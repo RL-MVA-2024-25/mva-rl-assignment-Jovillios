@@ -127,3 +127,9 @@ dmypy.json
 
 # Score file for grading
 score.txt
+
+# Mac
+.DS_Store
+
+# Vscode
+.vscode/
