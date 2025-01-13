@@ -1,20 +1,46 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import random
 import numpy as np
-from collections import deque
 from gymnasium.wrappers import TimeLimit
-from env_hiv import HIVPatient
+# from env_hiv import HIVPatient
 from fast_env import FastHIVPatient
 
-# Initialize the environment
 env = TimeLimit(env=FastHIVPatient(domain_randomization=False),
                 max_episode_steps=200)
 
-# Define the Q-Network using PyTorch
+
+def greedy_action(network, state):
+    device = "cuda" if next(network.parameters()).is_cuda else "cpu"
+    with torch.no_grad():
+        Q = network(torch.Tensor(state).unsqueeze(0).to(device))
+        return torch.argmax(Q).item()
+
+# Define the replay buffer
 
 
+class ReplayBuffer:
+    def __init__(self, capacity, device):
+        self.capacity = int(capacity)  # capacity of the buffer
+        self.data = []
+        self.index = 0  # index of the next cell to be filled
+        self.device = device
+
+    def append(self, s, a, r, s_, d):
+        if len(self.data) < self.capacity:
+            self.data.append(None)
+        self.data[self.index] = (s, a, r, s_, d)
+        self.index = (self.index + 1) % self.capacity
+
+    def sample(self, batch_size):
+        batch = random.sample(self.data, batch_size)
+        return list(map(lambda x: torch.Tensor(np.array(x)).to(self.device), list(zip(*batch))))
+
+    def __len__(self):
+        return len(self.data)
+
+
+# Define the QNetwork
 class QNetwork(nn.Module):
     def __init__(self, state_size, action_size):
         super(QNetwork, self).__init__()
@@ -31,70 +57,94 @@ class QNetwork(nn.Module):
 
 
 class ProjectAgent:
-    def __init__(self, state_size=6, action_size=4):
-        self.state_size = state_size
-        self.action_size = action_size
-        self.memory = deque(maxlen=2000)  # Replay buffer
-        self.gamma = 0.95  # Discount factor
-        self.epsilon = 1.0  # Exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.batch_size = 32
-        self.learning_rate = 0.001
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self):
+        config = {'nb_actions': 4,
+                  'state_space': 6,
+                  'learning_rate': 0.001,
+                  'gamma': 0.95,
+                  'buffer_size': 1000000,
+                  'epsilon_min': 0.01,
+                  'epsilon_max': 1.,
+                  'epsilon_decay_period': 100000,
+                  'epsilon_delay_decay': 20,
+                  'batch_size': 20}
 
-        self.model = QNetwork(state_size, action_size).to(self.device)
-        self.optimizer = optim.Adam(
-            self.model.parameters(), lr=self.learning_rate)
-        self.criterion = nn.MSELoss()
+        self.model = QNetwork(config['state_space'], config['nb_actions'])
+        device = "cuda" if next(self.model.parameters()).is_cuda else "cpu"
+        self.gamma = config['gamma']
+        self.batch_size = config['batch_size']
+        self.nb_actions = config['nb_actions']
+        self.memory = ReplayBuffer(config['buffer_size'], device)
+        self.epsilon_max = config['epsilon_max']
+        self.epsilon_min = config['epsilon_min']
+        self.epsilon_stop = config['epsilon_decay_period']
+        self.epsilon_delay = config['epsilon_delay_decay']
+        self.epsilon_step = (
+            self.epsilon_max-self.epsilon_min)/self.epsilon_stop
+        self.criterion = torch.nn.MSELoss()
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=config['learning_rate'])
+        self.max_episode_step = 200
 
-    def act(self, observation, use_random=False):
-        """Choose an action based on the current observation."""
-        if use_random or np.random.rand() <= self.epsilon:
-            return random.randint(0, self.action_size - 1)
-
-        observation = torch.FloatTensor(observation).unsqueeze(
-            0).to(self.device)  # Add batch dimension
-        with torch.no_grad():
-            q_values = self.model(observation)
-        return torch.argmax(q_values).item()
-
-    def remember(self, state, action, reward, next_state, done):
-        """Store experience in replay buffer."""
-        self.memory.append((state, action, reward, next_state, done))
-
-    def replay(self):
-        """Train the model using experiences from the replay buffer."""
-        if len(self.memory) < self.batch_size:
-            return
-
-        minibatch = random.sample(self.memory, self.batch_size)
-        for state, action, reward, next_state, done in minibatch:
-            state = torch.FloatTensor(state).to(self.device)
-            next_state = torch.FloatTensor(next_state).to(self.device)
-            reward = torch.FloatTensor([reward]).to(self.device)
-            done = torch.FloatTensor([done]).to(self.device)
-
-            # Compute the target Q-value
-            with torch.no_grad():
-                target = reward
-                if not done:
-                    target += self.gamma * torch.max(self.model(next_state))
-
-            # Compute the predicted Q-value
-            q_values = self.model(state)
-            target_f = q_values.clone()
-            target_f[action] = target
-
-            # Update the model
+    def gradient_step(self):
+        if len(self.memory) > self.batch_size:
+            X, A, R, Y, D = self.memory.sample(self.batch_size)
+            QYmax = self.model(Y).max(1)[0].detach()
+            # update = torch.addcmul(R, self.gamma, 1-D, QYmax)
+            update = torch.addcmul(R, 1-D, QYmax, value=self.gamma)
+            QXA = self.model(X).gather(1, A.to(torch.long).unsqueeze(1))
+            loss = self.criterion(QXA, update.unsqueeze(1))
             self.optimizer.zero_grad()
-            loss = self.criterion(q_values, target_f)
             loss.backward()
             self.optimizer.step()
 
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+    def act(self, observation, use_random=False):
+        return greedy_action(self.model, observation)
+
+    def train(self, env, max_episode):
+        episode_return = []
+        episode = 0
+        episode_cum_reward = 0
+        state, _ = env.reset()
+        epsilon = self.epsilon_max
+        step = 0
+
+        while episode < max_episode:
+            # update epsilon
+            if step > self.epsilon_delay:
+                epsilon = max(self.epsilon_min, epsilon-self.epsilon_step)
+
+            # select epsilon-greedy action
+            if np.random.rand() < epsilon:
+                action = env.action_space.sample()
+            else:
+                action = greedy_action(self.model, state)
+
+            # step
+            next_state, reward, done, trunc, _ = env.step(action)
+            self.memory.append(state, action, reward, next_state, done)
+            episode_cum_reward += reward
+            # train
+            self.gradient_step()
+
+            # next transition
+            step += 1
+            if done or trunc or step >= self.max_episode_step:
+                episode += 1
+                if episode % (max_episode//100) == 0:
+                    print("Episode ", '{:3d}'.format(episode),
+                          ", epsilon ", '{:6.2f}'.format(epsilon),
+                          ", batch size ", '{:5d}'.format(len(self.memory)),
+                          ", episode return ", '{:4.1f}'.format(
+                        episode_cum_reward),
+                        sep='')
+                state, _ = env.reset()
+                episode_return.append(episode_cum_reward)
+                episode_cum_reward = 0
+            else:
+                state = next_state
+
+        return episode_return
 
     def save(self, path="model.pth"):
         """Save the trained model."""
@@ -106,28 +156,13 @@ class ProjectAgent:
         self.model.eval()
 
 
-# Training the agent
-state_size = env.observation_space.shape[0]
-action_size = env.action_space.n
-agent = ProjectAgent(state_size, action_size)
-episodes = 500  # Number of episodes to train
-
-for episode in range(episodes):
-    state = env.reset()[0]  # Reset environment, extract initial state
-    total_reward = 0
-    for time in range(200):  # Max steps per episode
-        action = agent.act(state)
-        next_state, reward, done, _, _ = env.step(action)
-        total_reward += reward
-        agent.remember(state, action, reward, next_state, done)
-        state = next_state
-
-        if done:
-            print(
-                f"Episode {episode + 1}/{episodes}, Total Reward: {total_reward}")
-            break
-
-    agent.replay()  # Train using replay buffer
-
-# Save the trained model
-agent.save("model.pth")
+if __name__ == "__main__":
+    # Initialize the environment
+    agent = ProjectAgent()
+    scores = agent.train(env, 1000000)
+    # plot score
+    import matplotlib.pyplot as plt
+    plt.plot(scores)
+    plt.show()
+    print("Save the model")
+    agent.save()
