@@ -11,45 +11,51 @@ import numpy as np
 from tqdm import tqdm
 
 
-def collect_samples(env, horizon, disable_tqdm=False, print_done_states=False):
-    s, _ = env.reset()
-    # dataset = []
-    S = []
-    A = []
-    R = []
-    S2 = []
-    D = []
-    for _ in tqdm(range(horizon), disable=disable_tqdm):
-        a = env.action_space.sample()
-        s2, r, done, trunc, _ = env.step(a)
-        # dataset.append((s,a,r,s2,done,trunc))
-        S.append(s)
-        A.append(a)
-        R.append(r)
-        S2.append(s2)
-        D.append(done)
-        if done or trunc:
-            s, _ = env.reset()
-            if done and print_done_states:
-                print("done!")
-        else:
-            s = s2
-    S = np.array(S)
-    A = np.array(A).reshape((-1, 1))
-    R = np.array(R)
-    S2 = np.array(S2)
-    D = np.array(D)
-    return S, A, R, S2, D
-
-
 class ProjectAgent:
     def __init__(self):
         self.Qfunction = None
         self.gamma = 0.95
+        self.iterations = 10
         self.nb_actions = 4
+        self.epsilon = 0.2
+
+    def collect_samples(self, env, horizon, disable_tqdm=False, print_done_states=False, prior=None):
+        s, _ = env.reset()
+        # dataset = []
+        S = []
+        A = []
+        R = []
+        S2 = []
+        D = []
+        for _ in tqdm(range(horizon), disable=disable_tqdm):
+            if prior:
+                a = self.act(s, use_random=True)
+            else:
+                a = env.action_space.sample()
+            s2, r, done, trunc, _ = env.step(a)
+            # dataset.append((s,a,r,s2,done,trunc))
+            S.append(s)
+            A.append(a)
+            R.append(r)
+            S2.append(s2)
+            D.append(done)
+            if done or trunc:
+                s, _ = env.reset()
+                if done and print_done_states:
+                    print("done!")
+            else:
+                s = s2
+        S = np.array(S)
+        A = np.array(A).reshape((-1, 1))
+        R = np.array(R)
+        S2 = np.array(S2)
+        D = np.array(D)
+        return S, A, R, S2, D
 
     def act(self, observation, use_random=False):
         Qsa = []
+        if use_random and random.random() < self.epsilon:
+            return random.randint(0, 3)
         for a in range(4):
             sa = np.append(observation, a).reshape(1, -1)
             Qsa.append(self.Qfunction[-1].predict(sa))
@@ -75,10 +81,16 @@ class ProjectAgent:
             Qfunctions.append(Q)
         return Qfunctions[-1]
 
-    def train(self, env, horizon):
-        S, A, R, S2, D = collect_samples(env, horizon)
-        self.Qfunction = self.rf_fqi(
-            S, A, R, S2, D, 100, self.nb_actions, self.gamma)
+    def train(self, env, horizon, n_epochs=6):
+        for i in range(n_epochs):
+            print("Epoch ", i+1)
+            if i == 0:
+                prior = False
+            else:
+                prior = True
+            S, A, R, S2, D = self.collect_samples(env, horizon, prior=prior)
+            self.Qfunction = self.rf_fqi(
+                S, A, R, S2, D, self.iterations, self.nb_actions, self.gamma)
 
     def save(self, path="tree.pkl"):
         """Save the trained model."""
@@ -99,5 +111,5 @@ if __name__ == "__main__":
 
     # Initialize the environment
     agent = ProjectAgent()
-    agent.train(env, 1000)
+    agent.train(env, 10000)
     agent.save()
