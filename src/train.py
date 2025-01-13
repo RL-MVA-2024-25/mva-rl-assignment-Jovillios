@@ -4,10 +4,6 @@ import random
 import numpy as np
 from gymnasium.wrappers import TimeLimit
 # from env_hiv import HIVPatient
-from fast_env import FastHIVPatient
-
-env = TimeLimit(env=FastHIVPatient(domain_randomization=False),
-                max_episode_steps=200)
 
 
 def greedy_action(network, state):
@@ -157,12 +153,13 @@ class ProjectAgent:
 
 
 if __name__ == "__main__":
+    from fast_env import FastHIVPatient
+
+    env = TimeLimit(env=FastHIVPatient(domain_randomization=False),
+                    max_episode_steps=200)
+
     # Initialize the environment
     agent = ProjectAgent()
     scores = agent.train(env, 1000000)
-    # plot score
-    import matplotlib.pyplot as plt
-    plt.plot(scores)
-    plt.show()
-    print("Save the model")
+    # Save the model
     agent.save()
