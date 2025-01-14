@@ -6,6 +6,7 @@ import random
 import numpy as np
 from gymnasium.wrappers import TimeLimit
 # from env_hiv import HIVPatient
+from torch.utils.tensorboard import SummaryWriter
 
 
 def greedy_action(network, state):
@@ -41,16 +42,32 @@ class ReplayBuffer:
 
 # Define the QNetwork
 class QNetwork(nn.Module):
-    def __init__(self, state_size, action_size, hidden_dim=256):
+    def __init__(self, input_dim, output_dim, h_dim=128, n_layers=6):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_size, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, action_size)
+
+        # Ensure at least one hidden layer
+        assert n_layers >= 1, "The network must have at least one layer!"
+
+        layers = []
+
+        # Input layer
+        layers.append(nn.Linear(input_dim, h_dim))
+        layers.append(nn.ReLU())  # Activation function
+
+        # Hidden layers
+        for _ in range(n_layers - 1):
+            layers.append(nn.Linear(h_dim, h_dim))
+            layers.append(nn.ReLU())
+
+        # Output layer
+        layers.append(nn.Linear(h_dim, output_dim))
+
+        # Combine all layers into a Sequential module
+        self.network = nn.Sequential(*layers)
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.network(x)
+
 
 # Define the agent
 
@@ -59,7 +76,7 @@ class ProjectAgent:
     def __init__(self):
         config = {'nb_actions': 4,
                   'learning_rate': 0.001,
-                  'gamma': 0.99,
+                  'gamma': 0.95,
                   'buffer_size': 1000000,
                   'epsilon_min': 0.10,
                   'epsilon_max': 1.,
@@ -169,19 +186,9 @@ if __name__ == "__main__":
     # env = gym.make('CartPole-v1')
     # Initialize the environment
     # action/observation space
-    model = QNetwork(env.observation_space.shape[0], env.action_space.n)
-    config = config = {'nb_actions': env.action_space.n,
-                       'learning_rate': 0.001,
-                       'gamma': 0.99,
-                       'buffer_size': 1000000,
-                       'epsilon_min': 0.10,
-                       'epsilon_max': 1.,
-                       'epsilon_decay_period': 10000,
-                       'epsilon_delay_decay': 20,
-                       'batch_size': 64}
-    agent = ProjectAgent(config, model)
+    agent = ProjectAgent()
     # run_name from arguments
     run_name = sys.argv[1]
-    scores = agent.train(env, 2000, run_name)
+    scores = agent.train(env, 200, run_name)
     # Save the model
     agent.save()
