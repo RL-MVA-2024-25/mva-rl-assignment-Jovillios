@@ -134,3 +134,6 @@ scores/
 
 # Vscode
 .vscode/
+
+# Tensorboard
+runs/
