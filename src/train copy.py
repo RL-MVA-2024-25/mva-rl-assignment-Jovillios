@@ -63,7 +63,7 @@ class ProjectAgent:
                   'epsilon_max': 1.,
                   'epsilon_decay_period': 100000,
                   'epsilon_delay_decay': 20,
-                  'batch_size': 20}
+                  'batch_size': 200}
 
         self.model = QNetwork(config['state_space'], config['nb_actions'])
         device = "cuda" if next(self.model.parameters()).is_cuda else "cpu"
@@ -80,7 +80,7 @@ class ProjectAgent:
         self.criterion = torch.nn.MSELoss()
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=config['learning_rate'])
-        self.max_episode_step = 200
+        self.max_episode_step = 2000
 
     def gradient_step(self):
         if len(self.memory) > self.batch_size:
@@ -160,6 +160,6 @@ if __name__ == "__main__":
 
     # Initialize the environment
     agent = ProjectAgent()
-    scores = agent.train(env, 1000000)
+    scores = agent.train(env, 10000)
     # Save the model
     agent.save()
