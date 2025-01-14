@@ -56,7 +56,17 @@ class QNetwork(nn.Module):
 
 
 class ProjectAgent:
-    def __init__(self, config, model):
+    def __init__(self):
+        config = {'nb_actions': 4,
+                  'learning_rate': 0.001,
+                  'gamma': 0.99,
+                  'buffer_size': 1000000,
+                  'epsilon_min': 0.10,
+                  'epsilon_max': 1.,
+                  'epsilon_decay_period': 10000,
+                  'epsilon_delay_decay': 20,
+                  'batch_size': 64}
+        model = QNetwork(6, 4)
         device = "cuda" if next(model.parameters()).is_cuda else "cpu"
         self.gamma = config['gamma']
         self.batch_size = config['batch_size']
