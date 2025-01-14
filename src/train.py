@@ -17,7 +17,7 @@ class ProjectAgent:
         self.gamma = 0.95
         self.iterations = 10
         self.nb_actions = 4
-        self.epsilon = 0.2
+        self.epsilon = 0.5
 
     def collect_samples(self, env, horizon, disable_tqdm=False, print_done_states=False, prior=None):
         s, _ = env.reset()
