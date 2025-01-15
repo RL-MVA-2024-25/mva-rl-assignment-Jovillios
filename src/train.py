@@ -18,7 +18,7 @@ def greedy_action(network, state, device):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, h_dim=512, n_layers=7):
+    def __init__(self, input_dim, output_dim, h_dim=128, n_layers=5):
         super(QNetwork, self).__init__()
 
         # Ensure at least one hidden layer
@@ -39,10 +39,10 @@ class QNetwork(nn.Module):
         layers.append(nn.Linear(h_dim, output_dim))
 
         # Combine all layers into a Sequential module
-        self.network = nn.Sequential(*layers)
+        self.DQN = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.network(x)
+        return self.DQN(x)
 
 
 class ReplayBuffer:
