@@ -18,7 +18,7 @@ def greedy_action(network, state, device):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim, h_dim=256, n_layers=6):
+    def __init__(self, input_dim, output_dim, h_dim=512, n_layers=7):
         super(QNetwork, self).__init__()
 
         # Ensure at least one hidden layer
